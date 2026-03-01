@@ -7,29 +7,6 @@ dotenv.config();
 
 export const apiRouter = express.Router();
 
-// Setup Nodemailer (Ethereal for demo)
-let transporter: nodemailer.Transporter;
-nodemailer.createTestAccount().then(testAccount => {
-  transporter = nodemailer.createTransport({
-    host: "smtp.ethereal.email",
-    port: 587,
-    secure: false,
-    auth: {
-      user: testAccount.user,
-      pass: testAccount.pass,
-    },
-  });
-  console.log("[MAIL] Ethereal test account created:", testAccount.user);
-}).catch(err => {
-  console.error("[MAIL] Failed to create test account, falling back to console logging:", err);
-  transporter = {
-    sendMail: async (mailOptions: any) => {
-      console.log("[MAIL-SIM] Sending email:", mailOptions);
-      return { messageId: "simulated-id" };
-    }
-  } as any;
-});
-
 // Supabase Service Role Client (Private)
 const supabaseUrl = process.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
@@ -43,9 +20,38 @@ const supabaseAdmin = (supabaseUrl && supabaseServiceKey)
   ? createClient(supabaseUrl, supabaseServiceKey)
   : null;
 
+// Client for token verification (using anon key)
 const supabaseVerify = (supabaseUrl && supabaseAnonKey)
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
+
+// Setup Nodemailer (Ethereal for demo)
+let transporter: nodemailer.Transporter | null = null;
+async function getTransporter() {
+  if (transporter) return transporter;
+  try {
+    const testAccount = await nodemailer.createTestAccount();
+    transporter = nodemailer.createTransport({
+      host: "smtp.ethereal.email",
+      port: 587,
+      secure: false,
+      auth: {
+        user: testAccount.user,
+        pass: testAccount.pass,
+      },
+    });
+    console.log("[MAIL] Ethereal test account created:", testAccount.user);
+  } catch (err) {
+    console.error("[MAIL] Failed to create test account, falling back to console logging:", err);
+    transporter = {
+      sendMail: async (mailOptions: any) => {
+        console.log("[MAIL-SIM] Sending email:", mailOptions);
+        return { messageId: "simulated-id" };
+      }
+    } as any;
+  }
+  return transporter as nodemailer.Transporter;
+}
 
 // API routes
 apiRouter.post("/delete-account", async (req, res) => {
@@ -108,6 +114,7 @@ apiRouter.get("/health", async (req, res) => {
   });
 });
 
+// Admin API: Get all users
 apiRouter.get("/admin/users", async (req, res) => {
   if (!supabaseAdmin) {
     return res.status(500).json({ error: "Supabase admin not configured" });
@@ -128,6 +135,7 @@ apiRouter.get("/admin/users", async (req, res) => {
   }
 });
 
+// Admin API: Get total idea count
 apiRouter.get("/admin/ideas/count", async (req, res) => {
   if (!supabaseAdmin) {
     return res.status(500).json({ error: "Supabase admin not configured" });
@@ -147,6 +155,7 @@ apiRouter.get("/admin/ideas/count", async (req, res) => {
   }
 });
 
+// Admin API: Get all ideas with author details
 apiRouter.get("/admin/ideas", async (req, res) => {
   if (!supabaseAdmin) {
     return res.status(500).json({ error: "Supabase admin not configured" });
@@ -186,6 +195,7 @@ apiRouter.get("/admin/ideas", async (req, res) => {
   }
 });
 
+// Admin API: Delete an idea
 apiRouter.delete("/admin/ideas/:id", async (req, res) => {
   if (!supabaseAdmin) {
     return res.status(500).json({ error: "Supabase admin not configured" });
@@ -208,6 +218,7 @@ apiRouter.delete("/admin/ideas/:id", async (req, res) => {
   }
 });
 
+// Admin API: Delete a user
 apiRouter.delete("/admin/users/:id", async (req, res) => {
   if (!supabaseAdmin) {
     return res.status(500).json({ error: "Supabase admin not configured" });
@@ -227,6 +238,7 @@ apiRouter.delete("/admin/users/:id", async (req, res) => {
   }
 });
 
+// Admin API: Update a user
 apiRouter.patch("/admin/users/:id", async (req, res) => {
   if (!supabaseAdmin) {
     return res.status(500).json({ error: "Supabase admin not configured" });
@@ -270,6 +282,7 @@ apiRouter.patch("/admin/users/:id", async (req, res) => {
   }
 });
 
+// Admin API: Create a new user
 apiRouter.post("/admin/users", async (req, res) => {
   if (!supabaseAdmin) {
     return res.status(500).json({ error: "Supabase admin not configured" });
@@ -321,6 +334,7 @@ apiRouter.post("/admin/users", async (req, res) => {
   }
 });
 
+// Public API: Get platform stats
 apiRouter.get("/public/stats", async (req, res) => {
   if (!supabaseAdmin) {
     return res.json({ ideas: 2500, votes: 50000 });
@@ -349,21 +363,24 @@ apiRouter.get("/public/stats", async (req, res) => {
   }
 });
 
+// In-memory store for verification codes (for demo purposes)
 const verificationCodes = new Map<string, { code: string; expires: number }>();
 
+// API: Send custom verification code
 apiRouter.post("/auth/send-code", async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: "Email is required" });
 
   const code = Math.floor(10000000 + Math.random() * 90000000).toString();
-  const expires = Date.now() + 10 * 60 * 1000;
+  const expires = Date.now() + 10 * 60 * 1000; // 10 minutes expiry
 
   verificationCodes.set(email.toLowerCase(), { code, expires });
 
   console.log(`[AUTH] Verification code for ${email}: ${code}`);
   
   try {
-    const info = await transporter.sendMail({
+    const mailer = await getTransporter();
+    const info = await mailer.sendMail({
       from: '"IdeaConnect Auth" <auth@ideaconnect.com>',
       to: email,
       subject: "Your Verification Code",
@@ -393,6 +410,7 @@ apiRouter.post("/auth/send-code", async (req, res) => {
   res.json({ success: true, message: "Verification code sent to email (check server logs for demo)" });
 });
 
+// API: Verify custom code
 apiRouter.post("/auth/verify-code", async (req, res) => {
   const { email, code } = req.body;
   if (!email || !code) return res.status(400).json({ error: "Email and code are required" });
@@ -412,6 +430,7 @@ apiRouter.post("/auth/verify-code", async (req, res) => {
   res.json({ success: true });
 });
 
+// API: Update password using verified code
 apiRouter.post("/auth/update-password", async (req, res) => {
   const { email, code, newPassword } = req.body;
   if (!email || !code || !newPassword) {

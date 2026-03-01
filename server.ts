@@ -11,7 +11,7 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Mount the API router
+  // Mount the extracted API routes
   app.use("/api", apiRouter);
 
   // Vite middleware for development
