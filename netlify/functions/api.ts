@@ -6,8 +6,10 @@ const app = express();
 
 app.use(express.json());
 
-// Mount the router at /api so it matches the frontend fetch calls
-// when Netlify redirects /api/* to /.netlify/functions/api/*
-app.use("/api", apiRouter);
+// Mount the router at the root since serverless-http will strip the basePath
+app.use("/", apiRouter);
 
-export const handler = serverless(app);
+// Configure serverless-http to strip the Netlify function path
+export const handler = serverless(app, {
+  basePath: '/.netlify/functions/api'
+});
