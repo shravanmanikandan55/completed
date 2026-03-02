@@ -14,9 +14,17 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Bypass cache for API requests and non-GET requests
+  if (event.request.url.includes('/api/') || event.request.method !== 'GET') {
+    return; // Let the browser handle the request normally
+  }
+
   event.respondWith(
     caches.match(event.request).then((response) => {
       return response || fetch(event.request);
+    }).catch(() => {
+      // Fallback for offline if fetch fails
+      return fetch(event.request);
     })
   );
 });
